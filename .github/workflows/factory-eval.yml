@@ -16,23 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for diff metrics
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r factory/requirements.txt
 
       - name: Run Factory Eval
-        run: |
-          chmod +x factory/hooks/ci-eval.sh
-          ./factory/hooks/ci-eval.sh
+        run: python3 factory/hooks/ci_eval.py
         env:
           BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
           BRAINTRUST_CC_PROJECT: Factory
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BRANCH: ${{ github.head_ref }}
           COMMIT_SHA: ${{ github.sha }}
-
-      - name: Post Braintrust Eval Comment
-        if: always()
-        uses: braintrustdata/eval-action@v1
-        with:
-          api_key: ${{ secrets.BRAINTRUST_API_KEY }}
-          runtime: node
-        continue-on-error: true  # Don't fail PR on eval issues

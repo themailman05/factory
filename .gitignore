@@ -5,3 +5,8 @@ tasks/
 # Environment
 .env
 *.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc

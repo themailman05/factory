@@ -275,10 +275,15 @@ fi
 # ── Post-run hooks ────────────────────────────────────────────────────────────
 HOOKS_DIR="$(cd "$(dirname "$0")" && pwd)/hooks"
 
-# Eval hook — log scores to Braintrust
-if [[ -x "$HOOKS_DIR/post-run-eval.sh" && -n "${BRAINTRUST_API_KEY:-}" ]]; then
+# Eval hook — log scores to Braintrust (Python SDK)
+VENV="$(cd "$(dirname "$0")" && pwd)/.venv"
+if [[ -f "$HOOKS_DIR/post_run_eval.py" && -n "${BRAINTRUST_API_KEY:-}" ]]; then
   echo "  📊 Running post-run eval..."
-  "$HOOKS_DIR/post-run-eval.sh" "$LOG_DIR" || echo "  ⚠️  Eval hook failed (non-fatal)"
+  if [[ -f "$VENV/bin/python3" ]]; then
+    "$VENV/bin/python3" "$HOOKS_DIR/post_run_eval.py" "$LOG_DIR" || echo "  ⚠️  Eval hook failed (non-fatal)"
+  else
+    echo "  ⚠️  No venv found at $VENV — run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  fi
 fi
 
 # Notify hook — send results to Telegram/webhook
