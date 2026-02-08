@@ -262,12 +262,32 @@ run_eval() {
   local venv="$SCRIPT_DIR/.venv"
   local hooks_dir="$SCRIPT_DIR/hooks"
 
-  if [[ -f "$hooks_dir/post_run_eval.py" && -n "${BRAINTRUST_API_KEY:-}" ]]; then
-    echo "  📊 Running Braintrust eval..."
-    if [[ -f "$venv/bin/python3" ]]; then
-      "$venv/bin/python3" "$hooks_dir/post_run_eval.py" "$LOG_DIR" || echo "  ⚠️  Eval hook failed (non-fatal)"
-    else
-      echo "  ⚠️  No venv at $venv — skipping eval"
+  if [[ ! -f "$venv/bin/python3" ]]; then
+    echo "  ⚠️  No venv at $venv — skipping eval"
+    return
+  fi
+
+  if [[ -z "${BRAINTRUST_API_KEY:-}" ]]; then
+    echo "  ⚠️  No BRAINTRUST_API_KEY — skipping eval"
+    return
+  fi
+
+  # 1. Mechanical scorer (build/efficiency/diff/integrity)
+  if [[ -f "$hooks_dir/post_run_eval.py" ]]; then
+    echo "  📊 Running mechanical eval..."
+    "$venv/bin/python3" "$hooks_dir/post_run_eval.py" "$LOG_DIR" || echo "  ⚠️  Mechanical eval failed (non-fatal)"
+  fi
+
+  # 2. LLM scorer (requirements/acceptance/regressions/quality/completeness)
+  if [[ -f "$hooks_dir/score_pr.py" ]]; then
+    echo "  🧠 Running LLM PR scorer..."
+    "$venv/bin/python3" "$hooks_dir/score_pr.py" "$LOG_DIR" || echo "  ⚠️  LLM scorer failed (non-fatal)"
+
+    # Include verdict in notification
+    if [[ -f "$LOG_DIR/score.json" ]]; then
+      VERDICT=$(python3 -c "import json; print(json.load(open('$LOG_DIR/score.json'))['verdict'])" 2>/dev/null || echo "UNKNOWN")
+      OVERALL=$(python3 -c "import json; print(f\"{json.load(open('$LOG_DIR/score.json'))['scores']['overall']:.1f}\")" 2>/dev/null || echo "?")
+      echo "  🏷️  Verdict: $VERDICT (overall: $OVERALL)"
     fi
   fi
 }
@@ -443,13 +463,33 @@ EOF
   echo ""
   echo "  🎉 SUCCESS after $ITER iteration(s)"
   echo "  PR: $PR_URL"
+  # Build score summary for notification
+  SCORE_MSG=""
+  if [[ -f "$LOG_DIR/score.json" ]]; then
+    SCORE_MSG=$(python3 -c "
+import json
+s = json.load(open('$LOG_DIR/score.json'))
+v = s['verdict']
+o = s['scores']['overall']
+reasons = s.get('reasons', {})
+overall_reason = reasons.get('overall', '')
+print(f'Verdict: {v} ({o:.1f}/1.0)')
+print(f'{overall_reason}')
+for k in ['requirements_met','acceptance_criteria','no_regressions']:
+    sc = s['scores'].get(k, 0)
+    r = reasons.get(k, '')
+    print(f'  {k}: {sc:.1f} — {r}')
+" 2>/dev/null || echo "Score: unavailable")
+  fi
+
   notify "🏭✅ Factory run complete!
 
 *${TASK_TITLE}*
 PR: $PR_URL
 Iterations: $ITER/$MAX_ITERS
 Model: $MODEL
-Status: All checks passed (local + CI)"
+
+📊 $SCORE_MSG"
 
 elif [[ "$STATUS" == "ci_timeout" ]]; then
   cat > "$LOG_DIR/result.json" <<EOF
