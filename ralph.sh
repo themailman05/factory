@@ -127,6 +127,13 @@ else
   echo "   Checked out existing branch: $BRANCH"
 fi
 
+# Ensure submodules are pinned to the correct commits
+echo "   Syncing submodules..."
+git submodule sync --recursive 2>/dev/null
+git submodule update --init --force plugins/f_link plugins/flutter_soloud 2>/dev/null
+git submodule update --init --force plugins/flutter_recorder 2>/dev/null
+echo "   Submodules synced"
+
 # ── Default checks ────────────────────────────────────────────────────────────
 if [[ -z "$CHECKS" && -z "$CHECK_SCRIPT" ]]; then
   if [[ -f "pubspec.yaml" ]]; then
