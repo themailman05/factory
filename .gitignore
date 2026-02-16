@@ -1,6 +1,7 @@
 # Run artifacts
 runs/
-tasks/
+# Ephemeral dispatch copies (dated)
+tasks/2*.md
 
 # Environment
 .env
