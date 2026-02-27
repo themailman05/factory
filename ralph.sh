@@ -152,9 +152,9 @@ fi
 
 # Ensure submodules are pinned to the correct commits
 echo "   Syncing submodules..."
-git submodule sync --recursive 2>/dev/null
-git submodule update --init --force plugins/f_link plugins/flutter_soloud 2>/dev/null
-git submodule update --init --force plugins/flutter_recorder 2>/dev/null
+git submodule sync 2>/dev/null || true
+git submodule update --init --force plugins/f_link plugins/flutter_soloud 2>&1 || true
+git submodule update --init --force plugins/flutter_recorder 2>&1 || true
 echo "   Submodules synced"
 
 # ── Default checks ────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ run_local_checks() {
     echo "  ▶ Running check: $check"
     case "$check" in
       flutter_analyze)
-        if ! ~/development/flutter/bin/flutter analyze --no-pub 2>&1 | tee -a "$check_log"; then
+        if ! ~/development/flutter/bin/flutter analyze --no-pub lib/ test/ integration_test/ 2>&1 | tee -a "$check_log"; then
           failed=1
         fi ;;
       flutter_test)
@@ -366,14 +366,34 @@ $FEEDBACK
 
   # ── Step 2: Run Claude Code ──
   echo "  🤖 Running Claude Code (model: $MODEL)..."
-  unbuffer claude \
+  # Run claude in background with timeout — unbuffer can hang if PTY doesn't close
+  claude \
     --model "$MODEL" \
     -p \
     --dangerously-skip-permissions \
     --max-budget-usd "$MAX_COST" \
     --append-system-prompt "You are a factory worker in a Ralph Wiggum loop. Your job is to make the code changes described in the task and ensure all checks pass. Be surgical and precise. Do not over-engineer." \
     "$PROMPT" \
-    > /dev/null 2>&1 || true
+    > "$LOG_DIR/claude-iter-$ITER.log" 2>&1 &
+  CLAUDE_PID=$!
+  echo "  🤖 Claude Code PID: $CLAUDE_PID"
+
+  # Wait with timeout (30 min per iteration)
+  CLAUDE_TIMEOUT=${CLAUDE_TIMEOUT:-1800}
+  CLAUDE_ELAPSED=0
+  while kill -0 "$CLAUDE_PID" 2>/dev/null; do
+    sleep 10
+    CLAUDE_ELAPSED=$((CLAUDE_ELAPSED + 10))
+    if [[ $CLAUDE_ELAPSED -ge $CLAUDE_TIMEOUT ]]; then
+      echo "  ⏰ Claude Code timed out after ${CLAUDE_TIMEOUT}s — killing"
+      kill "$CLAUDE_PID" 2>/dev/null
+      sleep 2
+      kill -9 "$CLAUDE_PID" 2>/dev/null
+      break
+    fi
+  done
+  wait "$CLAUDE_PID" 2>/dev/null || true
+  echo "  ✅ Claude Code finished (${CLAUDE_ELAPSED}s)"
 
   # ── Step 3: Local checks (fast feedback) ──
   echo ""
@@ -387,9 +407,9 @@ $FEEDBACK
     notify "❌ Iteration $ITER: Local checks failed, retrying..."
     # Run Braintrust eval even on failure
     EVAL_MD=""
-    if [[ -f "$FACTORY_DIR/hooks/iter_eval.py" ]]; then
+    if [[ -f "$SCRIPT_DIR/hooks/iter_eval.py" ]]; then
       echo "  📊 Running Braintrust eval..."
-      EVAL_JSON=$("$FACTORY_DIR/.venv/bin/python3" "$FACTORY_DIR/hooks/iter_eval.py" \
+      EVAL_JSON=$("$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/hooks/iter_eval.py" \
         "$LOG_DIR" "$ITER" "$REPO" "$BRANCH" 2>/dev/null || echo '{"markdown":"eval unavailable"}')
       EVAL_MD=$(echo "$EVAL_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('markdown',''))" 2>/dev/null || echo "")
     fi
@@ -413,9 +433,9 @@ $EVAL_MD"
 
   # Run Braintrust eval on success
   EVAL_MD=""
-  if [[ -f "$FACTORY_DIR/hooks/iter_eval.py" ]]; then
+  if [[ -f "$SCRIPT_DIR/hooks/iter_eval.py" ]]; then
     echo "  📊 Running Braintrust eval..."
-    EVAL_JSON=$("$FACTORY_DIR/.venv/bin/python3" "$FACTORY_DIR/hooks/iter_eval.py" \
+    EVAL_JSON=$("$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/hooks/iter_eval.py" \
       "$LOG_DIR" "$ITER" "$REPO" "$BRANCH" 2>/dev/null || echo '{"markdown":"eval unavailable"}')
     EVAL_MD=$(echo "$EVAL_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('markdown',''))" 2>/dev/null || echo "")
   fi
